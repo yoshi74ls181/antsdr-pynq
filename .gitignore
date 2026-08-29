@@ -23,3 +23,12 @@ PYNQ-PRIO/device_tree_overlays/dtc-1.4.4/
 *.ic16
 *.hex
 **/__pycache__
+# Generated build artifacts. These were previously committed, which made
+# `make dtbo` a silent no-op (pl.dtbo appeared up to date) and made
+# `make sdimg` fail outright (build_sdimg/ already existed, and the recipe
+# used a bare `mkdir`).
+PYNQ-PRIO/boards/*/prio_linux/dtbo/*.dtbo
+e200_boot_gen/build_sdimg/
+e200_boot_gen/system_top.bit
+PYNQ-PRIO/device_tree_overlays/dtc-1.4.4/
+PYNQ-PRIO/device_tree_overlays/dtc-v1.4.4.tar.gz

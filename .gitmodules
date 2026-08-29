@@ -1,6 +1,6 @@
 [submodule "PYNQ"]
 	path = PYNQ
-	url = git@github.com:zehicks/PYNQ.git
+	url = https://github.com/yoshi74ls181/PYNQ.git
 [submodule "hdl"]
 	path = hdl
-	url = git@github.com:zehicks/hdl.git
+	url = https://github.com/yoshi74ls181/hdl.git

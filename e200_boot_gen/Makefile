@@ -5,7 +5,7 @@ CROSS_COMPILE ?= arm-linux-gnueabihf-
 
 SDIMGDIR = $(CURDIR)/build_sdimg
 sdimg: 
-	mkdir $(SDIMGDIR)
+	mkdir -p $(SDIMGDIR)
 
 	touch 	$(SDIMGDIR)/boot.bif
 	echo "img : {[bootloader] ./zynq_fsbl.elf  system_top.bit  u-boot.elf [load=0x00100000]system.dtb}" >  $(SDIMGDIR)/boot.bif

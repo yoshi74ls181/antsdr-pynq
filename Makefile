@@ -18,10 +18,40 @@ pynq/kernel:
 	cp -r ./boards/e200 ./PYNQ/boards
 	$(MAKE) -C ./PYNQ/sdbuild BOARDS=e200 boot_files
 
+# PYNQ/sdbuild hard-errors unless it can find a prebuilt PYNQ sdist and root
+# filesystem, or is explicitly told to rebuild them:
+#   $(error REBUILD_PYNQ_SDIST not set and PYNQ_SDIST file ... does not exist)
+# sdbuild/prebuilt/ ships empty, so a fresh checkout must rebuild both. Detect
+# that automatically instead of failing with a confusing message.
+#
+# Rebuilding the sdist costs two extra Vivado overlay builds and a MicroBlaze
+# BSP compile; rebuilding the rootfs costs a full multistrap/qemu bootstrap.
+# After one successful build, `make cache-prebuilt` stores both artifacts so
+# subsequent builds skip all of it -- see the README.
+PYNQ_PREBUILT_DIR    := ./PYNQ/sdbuild/prebuilt
+PYNQ_PREBUILT_SDIST  := $(PYNQ_PREBUILT_DIR)/pynq_sdist.tar.gz
+PYNQ_PREBUILT_ROOTFS := $(PYNQ_PREBUILT_DIR)/pynq_rootfs.arm.tar.gz
+
+SDBUILD_FLAGS :=
+ifeq ($(wildcard $(PYNQ_PREBUILT_SDIST)),)
+SDBUILD_FLAGS += REBUILD_PYNQ_SDIST=True
+endif
+ifeq ($(wildcard $(PYNQ_PREBUILT_ROOTFS)),)
+SDBUILD_FLAGS += REBUILD_PYNQ_ROOTFS=True
+endif
+
 pynq:
 	rm -rf ./PYNQ/boards/e200
 	cp -r ./boards/e200 ./PYNQ/boards
-	$(MAKE) -C ./PYNQ/sdbuild BOARDS=e200
+	$(MAKE) -C ./PYNQ/sdbuild BOARDS=e200 $(SDBUILD_FLAGS)
+
+# Save the board-agnostic artifacts from a completed build so the next fresh
+# build can reuse them. Cuts hours off a rebuild.
+cache-prebuilt:
+	mkdir -p $(PYNQ_PREBUILT_DIR)
+	cp ./PYNQ/sdbuild/build/PYNQ/dist/pynq-*.tar.gz $(PYNQ_PREBUILT_SDIST)
+	cp ./PYNQ/sdbuild/output/jammy.arm.*.tar.gz $(PYNQ_PREBUILT_ROOTFS)
+	@echo "Cached:"; ls -lh $(PYNQ_PREBUILT_DIR)
 
 sdimg:
 	cp ./boards/e200/base/antsdre200/antsdre200.runs/impl_1/system_top.bit ./e200_boot_gen/system_top.bit
