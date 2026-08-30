@@ -6,7 +6,7 @@
 // generator has to be asked for explicitly.
 //
 // sel arrives from an axi_gpio in the sys_cpu_clk domain and is resynchronised
-// here into l_clk. It is a mode bit, changed between experiments rather than
+// here into the sample clock domain. It is a mode bit, changed between experiments rather than
 // per-sample, so a two-flop synchroniser is sufficient; there is no coherency
 // requirement against the sample stream.
 
@@ -38,7 +38,7 @@ module qick_tx_mux (
     end
     wire sel_r = sel_sync[1];
 
-    // The AD9361 consumes one sample per l_clk unconditionally, so the
+    // The DAC fifo accepts one sample per clock unconditionally, so the
     // generator is never back-pressured. When sel_r is low its samples are
     // simply discarded.
     assign qick_tready = 1'b1;
