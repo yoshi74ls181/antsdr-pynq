@@ -35,3 +35,21 @@ make install
 
 # Install libiio Python bindings
 pip3 install pylibiio pyadi-iio
+# Let the xilinx user use IIO buffers without root.
+#
+# Two separate things are needed. udev creates /dev/iio:deviceN root-only, and
+# that is what libiio mmaps -- but its local backend also writes sysfs
+# attributes (buffer/enable, buffer/length, scan_elements/*_en) which udev does
+# not chmod for us. Without the second rule, iio_readdev and pyadi-iio fail with
+# "Unable to allocate buffer: Permission denied (13)" even as a member of the
+# group. Jupyter runs as xilinx, so pynq_iio.ipynb needs both.
+groupadd -f iio
+if id xilinx >/dev/null 2>&1; then
+    usermod -aG iio xilinx
+fi
+mkdir -p /etc/udev/rules.d
+cat > /etc/udev/rules.d/90-iio.rules <<'RULES'
+# Only buffer/ and scan_elements/ are touched, not the whole device tree.
+SUBSYSTEM=="iio", KERNEL=="iio:device*", GROUP="iio", MODE="0660"
+SUBSYSTEM=="iio", KERNEL=="iio:device*", ACTION=="add|change", RUN+="/bin/sh -c 'chgrp -R iio /sys%p/buffer /sys%p/scan_elements 2>/dev/null; chmod -R g+w /sys%p/buffer /sys%p/scan_elements 2>/dev/null'"
+RULES
