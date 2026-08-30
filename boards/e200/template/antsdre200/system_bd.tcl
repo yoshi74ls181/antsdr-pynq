@@ -429,7 +429,7 @@ proc create_root_design { parentCell } {
   # Create instance: rom_sys_0, and set properties
   set rom_sys_0 [ create_bd_cell -type ip -vlnv analog.com:user:sysid_rom:1.0 rom_sys_0 ]
   set_property -dict [ list \
-   CONFIG.PATH_TO_FILE {/home/hicksze1/antsdr-pynq/boards/e200/base/antsdre200/mem_init_sys.txt} \
+   CONFIG.PATH_TO_FILE "[pwd]/mem_init_sys.txt" \
    CONFIG.ROM_ADDR_BITS {9} \
  ] $rom_sys_0
 
@@ -1130,3 +1130,6 @@ create_root_design ""
 
 common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 
+# The exported BD hardcoded an absolute path to base's mem_init_sys.txt and
+# never generated its own. base calls this from its hand-written system_bd.tcl.
+sysid_gen_sys_init_file
