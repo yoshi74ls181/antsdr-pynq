@@ -8,6 +8,7 @@ adi_project antsdre200
 adi_project_files antsdre200 [list \
   "$ad_hdl_dir/library/common/ad_iobuf.v" \
   "system.xdc" \
+  "qick_timing.xdc" \
   "ppsloop.v" \
   "ltc2630_spi.v" \
   "system_top.v" ]

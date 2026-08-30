@@ -8,6 +8,7 @@ PROJECT_NAME := antsdre200
 M_DEPS += system.xdc
 M_DEPS += qick_bd.tcl
 M_DEPS += qick_tx_mux.v
+M_DEPS += qick_timing.xdc
 M_DEPS += ../../../../hdl/library/common/ad_iobuf.v
 M_DEPS += ../../../../hdl/library/axi_ad9361/axi_ad9361_delay.tcl
 
