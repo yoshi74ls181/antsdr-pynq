@@ -100,9 +100,26 @@ In this repository:
 - `e200_boot_gen/Makefile` uses `mkdir -p`. With a bare `mkdir` and
   `build_sdimg/boot.bif` committed, `make sdimg` could never succeed on a
   fresh clone.
-- Generated artifacts (`pl.dtbo`, `build_sdimg/boot.bif`) are no longer
-  tracked. Committing `pl.dtbo` made `make dtbo` a silent no-op, because it
-  looked as new as its `.dts` source.
+- Generated artifacts are no longer tracked: `build_sdimg/boot.bif`, and
+  `pl.dtbo` both in the `PYNQ-PRIO` build directory and in
+  `boards/e200/base/`. Committing `pl.dtbo` made `make dtbo` a silent no-op,
+  because it looked as new as its `.dts` source.
+- `make dtbo` copies its output to `boards/e200/base/pl.dtbo`, which is the
+  copy `make sd` actually deploys. Previously the two were unconnected --
+  `make dtbo` wrote only under `PYNQ-PRIO` -- so editing
+  `prio_linux/dtso/pl.dts` and running `make dtbo && make sd` shipped the old
+  committed overlay. Latent only because the two files happened to be
+  identical. `base.bit` and `base.hwh` already worked this way, copied in by
+  `make base`.
+- `boards/e200/packages/iio` installs udev rules so the `xilinx` user can use
+  IIO buffers. Without them `iio_readdev` and `pyadi-iio` fail with
+  `Unable to allocate buffer: Permission denied (13)`, so Jupyter -- which runs
+  as `xilinx` -- could not capture samples at all. Granting the character
+  device to an `iio` group is necessary but not sufficient: libiio's local
+  backend also writes `buffer/` and `scan_elements/` sysfs attributes that udev
+  does not chmod, and the failure is identical without them. The rule matches
+  `add|change` because the AD9361 nodes do not exist at boot -- they appear when
+  `boot.py` applies `pl.dtbo`.
 - `PYNQ-PRIO/device_tree_overlays/Makefile` builds `dtc` directly rather than
   via `install.sh`, which ran `sudo apt-get` and added
   `ppa:ubuntu-toolchain-r/ppa` solely to compile that one tool. The `.dtbo`
@@ -111,6 +128,10 @@ In this repository:
   copy was generated against 5.15.36 and failed on four files whose changes
   5.15.19 either already has or does not need.
 - `make pynq` sets `REBUILD_PYNQ_*` automatically; `make cache-prebuilt` added.
+- The prebuilt cache is stamped with the `PYNQ` HEAD and `VERSION` it was built
+  from, and is rebuilt when either changes. The check previously tested only
+  file existence, so bumping the submodule would silently reuse a rootfs and
+  sdist built from a different tree. An unstamped cache counts as stale.
 
 In the `PYNQ` submodule (see its own history for detail):
 
@@ -122,6 +143,25 @@ In the `PYNQ` submodule (see its own history for detail):
   requirements, so building `argon2-cffi-bindings` from sdist does not pull a
   `packaging>=26.2` requirement that Ubuntu jammy cannot satisfy.
 - `LINUX_VERSION` set to `5.15.19-xilinx-v2022.1` to match PetaLinux 2022.1.
+- **`meta-pynq` is actually added as a layer.** sdbuild wrote
+  `CONFIG_USER_LAYER_2`, but PetaLinux's Kconfig makes `USER_LAYER_2` depend on
+  `USER_LAYER_1 != ""`, which in turn depends on `USER_LAYER_0 != ""`. Both
+  default to empty, so `petalinux-config --silentconfig` silently discarded the
+  line and the layer never reached `bblayers.conf`. Its device-tree bbappend
+  therefore never ran, leaving no `zyxclmm_drm` (`xlnx,zocl`) node -- and
+  PYNQ 3.x programs the PL through XRT/zocl rather than the legacy FPGA
+  manager, so `bootpy.service` failed with
+  `Programming Device failed: ENODEV (19)`. Because `base.bit` never loaded,
+  only `xadc` appeared under `/sys/bus/iio/devices` and the Ethernet PHY could
+  not attach at all, the `gmii-to-rgmii` bridge living in the PL. Slot 0 has no
+  dependency, so the layer now loads -- along with the `xlnk` node, the
+  `generic-uio` fabric node, PYNQ's bootargs, `chosen/pynq_board` and the
+  `linux-xlnx` kernel config fragments.
+- `check_env.sh` checks numpy and cffi by importing them with the build user's
+  interpreter, rather than `sudo -H python3 -m pip freeze`. That demanded a
+  password for a read-only check -- enough to make `make boot_files`
+  unrunnable unattended -- and, being pip-based against root's `HOME`, reported
+  both as missing on a host where they imported fine.
 - ZCU104 and Pynq-Z1 dropped from the sdist overlay list. ZCU104 needs an
   UltraScale+ MPSoC part; Pynq-Z1 was referenced nowhere else. Pynq-Z2 is
   retained because its XSAs build the MicroBlaze BSPs shipped in `pynq`.
