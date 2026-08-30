@@ -32,12 +32,30 @@ PYNQ_PREBUILT_DIR    := ./PYNQ/sdbuild/prebuilt
 PYNQ_PREBUILT_SDIST  := $(PYNQ_PREBUILT_DIR)/pynq_sdist.tar.gz
 PYNQ_PREBUILT_ROOTFS := $(PYNQ_PREBUILT_DIR)/pynq_rootfs.arm.tar.gz
 
+# The cache is only valid for the tree it was built from. Existence alone is not
+# enough: bumping the PYNQ submodule or its VERSION would otherwise silently
+# reuse a mismatched rootfs and sdist. Stamp both and compare.
+PYNQ_PREBUILT_STAMP := $(PYNQ_PREBUILT_DIR)/cache.stamp
+PYNQ_CACHE_ID := \
+  $(shell git -C ./PYNQ rev-parse HEAD 2>/dev/null) \
+  $(shell sed -n 's/^VERSION[[:space:]]*:*=[[:space:]]*//p' ./PYNQ/sdbuild/Makefile 2>/dev/null | head -1)
+PYNQ_CACHE_ID_STAMPED := $(shell cat $(PYNQ_PREBUILT_STAMP) 2>/dev/null)
+
 SDBUILD_FLAGS :=
+ifneq ($(strip $(PYNQ_CACHE_ID)),$(strip $(PYNQ_CACHE_ID_STAMPED)))
+# No stamp (fresh clone, or a cache from before this check) or a stale one.
+SDBUILD_FLAGS += REBUILD_PYNQ_SDIST=True REBUILD_PYNQ_ROOTFS=True
+ifneq ($(strip $(PYNQ_CACHE_ID_STAMPED)),)
+$(warning prebuilt cache was built from "$(PYNQ_CACHE_ID_STAMPED)", tree is now \
+"$(PYNQ_CACHE_ID)" -- rebuilding sdist and rootfs)
+endif
+else
 ifeq ($(wildcard $(PYNQ_PREBUILT_SDIST)),)
 SDBUILD_FLAGS += REBUILD_PYNQ_SDIST=True
 endif
 ifeq ($(wildcard $(PYNQ_PREBUILT_ROOTFS)),)
 SDBUILD_FLAGS += REBUILD_PYNQ_ROOTFS=True
+endif
 endif
 
 pynq:
@@ -51,14 +69,21 @@ cache-prebuilt:
 	mkdir -p $(PYNQ_PREBUILT_DIR)
 	cp ./PYNQ/sdbuild/build/PYNQ/dist/pynq-*.tar.gz $(PYNQ_PREBUILT_SDIST)
 	cp ./PYNQ/sdbuild/output/jammy.arm.*.tar.gz $(PYNQ_PREBUILT_ROOTFS)
+	@echo '$(PYNQ_CACHE_ID)' > $(PYNQ_PREBUILT_STAMP)
 	@echo "Cached:"; ls -lh $(PYNQ_PREBUILT_DIR)
+	@echo "Stamped: $$(cat $(PYNQ_PREBUILT_STAMP))"
 
 sdimg:
 	cp ./boards/e200/base/antsdre200/antsdre200.runs/impl_1/system_top.bit ./e200_boot_gen/system_top.bit
 	$(MAKE) -C ./e200_boot_gen sdimg
 
+# `make sd` deploys ./boards/e200/base/pl.dtbo, but the overlay is built under
+# PYNQ-PRIO. Copy it across, the same way `base` copies base.bit/base.hwh into
+# that directory. Without this the deployed pl.dtbo is whatever was committed and
+# never reflects prio_linux/dtso/pl.dts -- silently shipping a stale overlay.
 dtbo:
 	$(MAKE) -C ./PYNQ-PRIO/device_tree_overlays BOARDS=e200
+	cp -f ./PYNQ-PRIO/boards/e200/prio_linux/dtbo/pl.dtbo ./boards/e200/base/pl.dtbo
 
 sd:
 	@[ "${SD}" ] || ( echo $(SD_MSG); exit 1 )
