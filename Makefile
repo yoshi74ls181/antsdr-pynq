@@ -94,6 +94,9 @@ sd:
 	sudo cp -f ./boards/e200/base/base.hwh $(SD)/root/home/xilinx/jupyter_notebooks/base
 	sudo cp -f ./boards/e200/base/pl.dtbo $(SD)/root/home/xilinx/jupyter_notebooks/base
 	sudo cp -f ./boards/e200/base/notebooks/*.ipynb $(SD)/root/home/xilinx/jupyter_notebooks/base
+	# Board-side runtime helper, unlike the host-side tools in utils/.
+	sudo cp -f ./boards/e200/utils/e200-power.sh $(SD)/root/home/xilinx/
+	sudo chmod +x $(SD)/root/home/xilinx/e200-power.sh
 
 overlay:
 	@[ "${OL}" ] || ( echo $(OL_MSG); exit 1 )
