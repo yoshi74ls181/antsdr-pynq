@@ -93,7 +93,7 @@ sd:
 	sudo cp -f ./boards/e200/base/base.bit $(SD)/root/home/xilinx/jupyter_notebooks/base
 	sudo cp -f ./boards/e200/base/base.hwh $(SD)/root/home/xilinx/jupyter_notebooks/base
 	sudo cp -f ./boards/e200/base/pl.dtbo $(SD)/root/home/xilinx/jupyter_notebooks/base
-	sudo cp -f ./boards/e200/base/notebooks/pynq_iio.ipynb $(SD)/root/home/xilinx/jupyter_notebooks/base
+	sudo cp -f ./boards/e200/base/notebooks/*.ipynb $(SD)/root/home/xilinx/jupyter_notebooks/base
 
 overlay:
 	@[ "${OL}" ] || ( echo $(OL_MSG); exit 1 )
