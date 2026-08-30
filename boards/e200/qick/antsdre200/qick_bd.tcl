@@ -47,22 +47,25 @@ set qick_rstn util_ad9361_divclk_reset/peripheral_aresetn
 ###############################################################################
 ## tProcessor v2
 ##
+## Named qick_processor_0, not something friendlier: QickSoc.map_signal_paths
+## detects the tProc by testing for that exact key in ip_dict.
+##
 ## ARITH=0 leaves dsp_macro_0 out: it is a 27x18 macro (DSP48E2) and a 7-series
 ## DSP48E1 is 25x18, so it would only map by spilling across slices.
 ## s_axi rides on ps_clk_i; there is no separate s_axi_aclk on this IP.
 ###############################################################################
-ad_ip_instance qick_processor tproc
-ad_ip_parameter tproc CONFIG.ARITH         0
-ad_ip_parameter tproc CONFIG.DIVIDER       0
-ad_ip_parameter tproc CONFIG.IN_PORT_QTY   1
-ad_ip_parameter tproc CONFIG.OUT_WPORT_QTY 1
+ad_ip_instance qick_processor qick_processor_0
+ad_ip_parameter qick_processor_0 CONFIG.ARITH         0
+ad_ip_parameter qick_processor_0 CONFIG.DIVIDER       0
+ad_ip_parameter qick_processor_0 CONFIG.IN_PORT_QTY   1
+ad_ip_parameter qick_processor_0 CONFIG.OUT_WPORT_QTY 1
 
-ad_connect $qick_clk  tproc/t_clk_i
-ad_connect $qick_clk  tproc/c_clk_i
-ad_connect sys_cpu_clk       tproc/ps_clk_i
-ad_connect $qick_rstn        tproc/t_resetn
-ad_connect $qick_rstn        tproc/c_resetn
-ad_connect sys_cpu_resetn    tproc/ps_resetn
+ad_connect $qick_clk  qick_processor_0/t_clk_i
+ad_connect $qick_clk  qick_processor_0/c_clk_i
+ad_connect sys_cpu_clk       qick_processor_0/ps_clk_i
+ad_connect $qick_rstn        qick_processor_0/t_resetn
+ad_connect $qick_rstn        qick_processor_0/c_resetn
+ad_connect sys_cpu_resetn    qick_processor_0/ps_resetn
 
 ###############################################################################
 ## Signal generator
@@ -79,8 +82,10 @@ ad_ip_parameter sg0 CONFIG.GEN_DDS       TRUE
 
 ad_connect $qick_clk  sg0/aclk
 ad_connect $qick_rstn        sg0/aresetn
-ad_connect $qick_clk  sg0/s0_axis_aclk
-ad_connect $qick_rstn        sg0/s0_axis_aresetn
+# s0_axis has a clock of its own so the envelope DMA can live in the PS domain;
+# sg0 crosses into aclk internally.
+ad_connect sys_cpu_clk       sg0/s0_axis_aclk
+ad_connect sys_cpu_resetn    sg0/s0_axis_aresetn
 ad_connect sys_cpu_clk       sg0/s_axi_aclk
 ad_connect sys_cpu_resetn    sg0/s_axi_aresetn
 
@@ -101,8 +106,11 @@ ad_connect sys_cpu_resetn    ro0/s_axi_aresetn
 ad_ip_instance axis_avg_buffer avg0
 ad_connect $qick_clk  avg0/s_axis_aclk
 ad_connect $qick_rstn        avg0/s_axis_aresetn
-ad_connect $qick_clk  avg0/m_axis_aclk
-ad_connect $qick_rstn        avg0/m_axis_aresetn
+# m_axis_aclk serves m0/m1/m2 together. It goes on the PS clock so the readout
+# DMAs attach without a crossing; m2_axis is clock-converted back to the tProc
+# below. This is how QICK's own designs arrange it.
+ad_connect sys_cpu_clk       avg0/m_axis_aclk
+ad_connect sys_cpu_resetn    avg0/m_axis_aresetn
 ad_connect sys_cpu_clk       avg0/s_axi_aclk
 ad_connect sys_cpu_resetn    avg0/s_axi_aresetn
 
@@ -121,20 +129,26 @@ ad_connect sys_cpu_resetn    avg0/s_axi_aresetn
 ad_ip_instance sg_translator sgt0
 ad_connect $qick_clk  sgt0/aclk
 ad_connect $qick_rstn        sgt0/aresetn
-ad_connect tproc/m0_axis     sgt0/s_tproc_axis
+ad_connect qick_processor_0/m0_axis     sgt0/s_tproc_axis
 ad_connect sgt0/m_gen_v6_axis sg0/s1_axis
 
-# Single-shot readout results feed back into the tProc for branching. Both sides
-# are 64 bits and both are on the sample clock, so no axis_clock_converter is
-# needed here (QICK's RFSoC designs need one because those run on different tiles).
-ad_connect avg0/m2_axis   tproc/s0_axis
+# Single-shot readout results feed back into the tProc for branching. avg0's
+# outputs are now on the PS clock and qick_processor_0/s0_axis is on c_clk, so this one
+# needs a crossing. Both sides are 64 bits.
+ad_ip_instance axis_clock_converter qick_avg2tproc
+ad_connect sys_cpu_clk    qick_avg2tproc/s_axis_aclk
+ad_connect sys_cpu_resetn qick_avg2tproc/s_axis_aresetn
+ad_connect $qick_clk      qick_avg2tproc/m_axis_aclk
+ad_connect $qick_rstn     qick_avg2tproc/m_axis_aresetn
+ad_connect avg0/m2_axis   qick_avg2tproc/S_AXIS
+ad_connect qick_avg2tproc/M_AXIS qick_processor_0/s0_axis
 
 # m1_axis is the decimated output, m0_axis the full-rate raw one -- QICK feeds
 # avg_buffer from m1_axis and sends m0_axis to a multi-rate buffer we do not
 # instantiate. Both are 32 bits, matching avg0/s_axis.
 ad_connect ro0/m1_axis    avg0/s_axis
 # tProc arms the accumulator.
-ad_connect tproc/trig_0_o avg0/trigger
+ad_connect qick_processor_0/trig_0_o avg0/trigger
 
 ###############################################################################
 ## AXI-lite register maps
@@ -145,7 +159,7 @@ ad_connect tproc/trig_0_o avg0/trigger
 ## 0x7C400000 entries. 0x4800_xxxx is free in GP0 and passes through unmapped
 ## (ad_cpu_interconnect only rebases 0x4xxx_xxxx for sys_zynq 2 and 3).
 ###############################################################################
-ad_cpu_interconnect 0x48000000 tproc
+ad_cpu_interconnect 0x48000000 qick_processor_0
 ad_cpu_interconnect 0x48010000 sg0
 ad_cpu_interconnect 0x48020000 ro0
 ad_cpu_interconnect 0x48030000 avg0
@@ -215,6 +229,99 @@ ad_connect qick_tx_mux_0/dac_data_i              axi_ad9361_dac_fifo/din_data_0
 ad_connect qick_tx_mux_0/dac_data_q              axi_ad9361_dac_fifo/din_data_1
 
 ad_cpu_interconnect 0x48040000 qick_gpio
+
+###############################################################################
+## PS-side DMA
+##
+## Xilinx axi_dma rather than ADI's axi_dmac, because QICK's Python driver
+## drives these through pynq.lib.dma, which wraps axi_dma. Scatter-gather is off
+## in all four, matching QICK: transfers are single contiguous buffers.
+##
+## Stream width is set equal to the memory-mapped width and the downsizing to
+## the 64-bit HP port is left to the smartconnect that ad_mem_hpx_interconnect
+## builds. That is what QICK does (256-bit DMA into a 128-bit HP port on their
+## ZynqMP) and it avoids putting axis_dwidth_converters in the path, where tlast
+## padding would have to be reasoned about.
+##
+## Names match QICK's own designs deliberately. axi_dma_tproc is required:
+## QickSoc.map_signal_paths resolves it by name (self.axi_dma_tproc). The other
+## three are found by connectivity tracing (QickMetadata.trace_dma), whose
+## no-switch path returns (dma, None, None) -- which is why this design needs no
+## axis_switch despite QICK's own projects always having them.
+##
+## Every DMA sits entirely in the sys_cpu_clk domain. That works out because
+## qick_processor_0's DMA ports are associated with ps_clk_i, and sg0/s0_axis and
+## avg0/m_axis have been placed on the PS clock above.
+###############################################################################
+
+# Program and data memory load, plus readback. 256-bit both ways.
+ad_ip_instance axi_dma axi_dma_tproc
+ad_ip_parameter axi_dma_tproc CONFIG.c_include_sg               0
+ad_ip_parameter axi_dma_tproc CONFIG.c_include_mm2s             1
+ad_ip_parameter axi_dma_tproc CONFIG.c_include_s2mm             1
+ad_ip_parameter axi_dma_tproc CONFIG.c_m_axi_mm2s_data_width    256
+ad_ip_parameter axi_dma_tproc CONFIG.c_m_axis_mm2s_tdata_width  256
+ad_ip_parameter axi_dma_tproc CONFIG.c_m_axi_s2mm_data_width    256
+ad_ip_parameter axi_dma_tproc CONFIG.c_s_axis_s2mm_tdata_width  256
+ad_ip_parameter axi_dma_tproc CONFIG.c_mm2s_burst_size          2
+ad_ip_parameter axi_dma_tproc CONFIG.c_sg_length_width          26
+
+# Envelope memory load for the generator. 32-bit.
+ad_ip_instance axi_dma axi_dma_gen
+ad_ip_parameter axi_dma_gen CONFIG.c_include_sg        0
+ad_ip_parameter axi_dma_gen CONFIG.c_include_mm2s      1
+ad_ip_parameter axi_dma_gen CONFIG.c_include_s2mm      0
+ad_ip_parameter axi_dma_gen CONFIG.c_sg_length_width   26
+
+# Accumulated results out of the averaging buffer. 64-bit.
+ad_ip_instance axi_dma axi_dma_avg
+ad_ip_parameter axi_dma_avg CONFIG.c_include_sg               0
+ad_ip_parameter axi_dma_avg CONFIG.c_include_mm2s             0
+ad_ip_parameter axi_dma_avg CONFIG.c_include_s2mm             1
+ad_ip_parameter axi_dma_avg CONFIG.c_m_axi_s2mm_data_width    64
+ad_ip_parameter axi_dma_avg CONFIG.c_s_axis_s2mm_tdata_width  64
+ad_ip_parameter axi_dma_avg CONFIG.c_sg_length_width          26
+
+# Decimated sample buffer out of the averaging buffer. 32-bit.
+ad_ip_instance axi_dma axi_dma_buf
+ad_ip_parameter axi_dma_buf CONFIG.c_include_sg        0
+ad_ip_parameter axi_dma_buf CONFIG.c_include_mm2s      0
+ad_ip_parameter axi_dma_buf CONFIG.c_include_s2mm      1
+ad_ip_parameter axi_dma_buf CONFIG.c_sg_length_width   26
+
+foreach d {axi_dma_tproc axi_dma_gen axi_dma_avg axi_dma_buf} {
+  ad_connect sys_cpu_clk    ${d}/s_axi_lite_aclk
+  ad_connect sys_cpu_resetn ${d}/axi_resetn
+}
+foreach d {axi_dma_tproc axi_dma_gen} {
+  ad_connect sys_cpu_clk ${d}/m_axi_mm2s_aclk
+}
+foreach d {axi_dma_tproc axi_dma_avg axi_dma_buf} {
+  ad_connect sys_cpu_clk ${d}/m_axi_s2mm_aclk
+}
+
+# Streams.
+ad_connect axi_dma_tproc/M_AXIS_MM2S  qick_processor_0/s_dma_axis_i
+ad_connect qick_processor_0/m_dma_axis_o          axi_dma_tproc/S_AXIS_S2MM
+ad_connect axi_dma_gen/M_AXIS_MM2S    sg0/s0_axis
+ad_connect avg0/m0_axis                axi_dma_avg/S_AXIS_S2MM
+ad_connect avg0/m1_axis                axi_dma_buf/S_AXIS_S2MM
+
+# Memory. HP1 and HP2 are taken by the base design's ADC and DAC DMAs; HP0 and
+# HP3 are free, and ad_mem_hpx_interconnect enables the PS port and builds the
+# smartconnect on its first call, which is why each starts with the PS port.
+ad_mem_hp0_interconnect sys_cpu_clk sys_ps7/S_AXI_HP0
+ad_mem_hp0_interconnect sys_cpu_clk axi_dma_tproc/M_AXI_MM2S
+ad_mem_hp0_interconnect sys_cpu_clk axi_dma_tproc/M_AXI_S2MM
+ad_mem_hp3_interconnect sys_cpu_clk sys_ps7/S_AXI_HP3
+ad_mem_hp3_interconnect sys_cpu_clk axi_dma_gen/M_AXI_MM2S
+ad_mem_hp3_interconnect sys_cpu_clk axi_dma_avg/M_AXI_S2MM
+ad_mem_hp3_interconnect sys_cpu_clk axi_dma_buf/M_AXI_S2MM
+
+ad_cpu_interconnect 0x48050000 axi_dma_tproc
+ad_cpu_interconnect 0x48060000 axi_dma_gen
+ad_cpu_interconnect 0x48070000 axi_dma_avg
+ad_cpu_interconnect 0x48080000 axi_dma_buf
 
 # Iteration aid: validate the block design and stop, skipping the ~1 h
 # synthesis + implementation run. Unset in normal builds.
