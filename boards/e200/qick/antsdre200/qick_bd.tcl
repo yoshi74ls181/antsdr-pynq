@@ -141,6 +141,65 @@ ad_cpu_interconnect 0x48010000 sg0
 ad_cpu_interconnect 0x48020000 ro0
 ad_cpu_interconnect 0x48030000 avg0
 
+###############################################################################
+## RX: AD9361 -> readout -> averaging buffer
+##
+## axi_ad9361 presents adc_data_i0 / adc_data_q0 as two 16-bit buses on l_clk
+## with adc_valid_i0. The readout's s_axis is 32 bits of {Q,I} (patch 0006 gives
+## it a complex input rather than the upstream real one), so concatenate the
+## pair: xlconcat puts In0 in the low bits, which is I.
+##
+## Both ADC buses already drive util_ad9361_adc_fifo. They are outputs, so the
+## extra fanout to the readout is fine and the stock capture path keeps working.
+###############################################################################
+ad_ip_instance xlconcat qick_adc_cat
+ad_ip_parameter qick_adc_cat CONFIG.NUM_PORTS  2
+ad_ip_parameter qick_adc_cat CONFIG.IN0_WIDTH 16
+ad_ip_parameter qick_adc_cat CONFIG.IN1_WIDTH 16
+ad_connect axi_ad9361/adc_data_i0   qick_adc_cat/In0
+ad_connect axi_ad9361/adc_data_q0   qick_adc_cat/In1
+ad_connect qick_adc_cat/dout        ro0/s_axis_tdata
+ad_connect axi_ad9361/adc_valid_i0  ro0/s_axis_tvalid
+
+###############################################################################
+## TX: mux between the stock DAC path and the QICK generator
+##
+## Defaults to the stock path, so a QICK build that produces nothing still
+## leaves the board's loopback behaviour intact. Selected by a dedicated
+## axi_gpio rather than by borrowing a bit of axi_gpreg's gp_out_*, which are
+## already routed out to system_top.v.
+###############################################################################
+# system_bd.tcl is sourced from inside adi_project, before adi_project_files
+# adds anything, so the module reference has to be put in the project here.
+add_files -norecurse -fileset sources_1 [list [file normalize ./qick_tx_mux.v]]
+update_compile_order -fileset sources_1
+
+ad_ip_instance axi_gpio qick_gpio
+ad_ip_parameter qick_gpio CONFIG.C_GPIO_WIDTH   1
+ad_ip_parameter qick_gpio CONFIG.C_ALL_OUTPUTS  1
+ad_connect sys_cpu_clk     qick_gpio/s_axi_aclk
+ad_connect sys_cpu_resetn  qick_gpio/s_axi_aresetn
+
+create_bd_cell -type module -reference qick_tx_mux qick_tx_mux_0
+ad_connect axi_ad9361/l_clk     qick_tx_mux_0/clk
+ad_connect $qick_rstn           qick_tx_mux_0/resetn
+ad_connect qick_gpio/gpio_io_o  qick_tx_mux_0/sel
+
+# Intercept the stock DAC feed: the base design wires dac_fifo straight to
+# axi_ad9361, so those nets have to go before the mux can sit in between.
+delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361/dac_data_i0]]
+delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361/dac_data_q0]]
+
+ad_connect axi_ad9361_dac_fifo/dout_data_0  qick_tx_mux_0/dma_data_i
+ad_connect axi_ad9361_dac_fifo/dout_data_1  qick_tx_mux_0/dma_data_q
+ad_connect sg0/m_axis_tdata                 qick_tx_mux_0/qick_tdata
+ad_connect sg0/m_axis_tvalid                qick_tx_mux_0/qick_tvalid
+ad_connect sg0/m_axis_tready                qick_tx_mux_0/qick_tready
+ad_connect qick_tx_mux_0/dac_data_i         axi_ad9361/dac_data_i0
+ad_connect qick_tx_mux_0/dac_data_q         axi_ad9361/dac_data_q0
+
+ad_cpu_interconnect 0x48040000 qick_gpio
+
 # Iteration aid: validate the block design and stop, skipping the ~1 h
 # synthesis + implementation run. Unset in normal builds.
 if {[info exists ::env(QICK_BD_ONLY)]} {
