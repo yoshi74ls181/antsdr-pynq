@@ -60,6 +60,16 @@ ad_ip_parameter qick_processor_0 CONFIG.DIVIDER       0
 ad_ip_parameter qick_processor_0 CONFIG.IN_PORT_QTY   1
 ad_ip_parameter qick_processor_0 CONFIG.OUT_WPORT_QTY 1
 
+# Memory depths. The IP defaults to 8 address bits on all three, i.e. 256 words
+# each, too small for anything but a trivial program. QICK's own projects use
+# PMEM_AW 12 / DMEM_AW 14 / WMEM_AW 10; PMEM and WMEM match here so their example
+# programs fit. DMEM is 12 rather than 14 because program memory is 256 bits per
+# word and so the expensive one, and a 7020 has 140 BRAM tiles, not an RFSoC's
+# supply. Costs about 9 tiles.
+ad_ip_parameter qick_processor_0 CONFIG.PMEM_AW       12
+ad_ip_parameter qick_processor_0 CONFIG.DMEM_AW       12
+ad_ip_parameter qick_processor_0 CONFIG.WMEM_AW       10
+
 ad_connect $qick_clk  qick_processor_0/t_clk_i
 ad_connect $qick_clk  qick_processor_0/c_clk_i
 ad_connect sys_cpu_clk       qick_processor_0/ps_clk_i
@@ -219,14 +229,23 @@ ad_connect qick_gpio/gpio_io_o  qick_tx_mux_0/sel
 # to go before the mux can sit in between.
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_data_0]]
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_data_1]]
+# valid_in has to be muxed alongside the data, or the data is presented with a
+# valid that describes the other source. din_enable_* is deliberately NOT touched:
+# it is an output of this util_rfifo, with the channel enables originating in
+# axi_ad9361 from the cf_axi_dds driver.
+delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_valid_in_0]]
+delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_valid_in_1]]
 
 ad_connect util_ad9361_dac_upack/fifo_rd_data_0  qick_tx_mux_0/dma_data_i
 ad_connect util_ad9361_dac_upack/fifo_rd_data_1  qick_tx_mux_0/dma_data_q
+ad_connect util_ad9361_dac_upack/fifo_rd_valid   qick_tx_mux_0/dma_valid_in
 ad_connect sg0/m_axis_tdata                      qick_tx_mux_0/qick_tdata
 ad_connect sg0/m_axis_tvalid                     qick_tx_mux_0/qick_tvalid
 ad_connect sg0/m_axis_tready                     qick_tx_mux_0/qick_tready
 ad_connect qick_tx_mux_0/dac_data_i              axi_ad9361_dac_fifo/din_data_0
 ad_connect qick_tx_mux_0/dac_data_q              axi_ad9361_dac_fifo/din_data_1
+ad_connect qick_tx_mux_0/dac_valid_in            axi_ad9361_dac_fifo/din_valid_in_0
+ad_connect qick_tx_mux_0/dac_valid_in            axi_ad9361_dac_fifo/din_valid_in_1
 
 ad_cpu_interconnect 0x48040000 qick_gpio
 
