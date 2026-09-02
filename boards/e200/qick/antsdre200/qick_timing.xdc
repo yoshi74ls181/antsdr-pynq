@@ -40,8 +40,3 @@ set_clock_groups -name qick_axi_to_datapath -asynchronous \
 # The tProc's trigger outputs are single-cycle strobes into the buffer blocks and
 # are resynchronised where they land; QICK false-paths them for the same reason.
 set_false_path -quiet -through [get_pins -quiet -hier -filter {name =~ */qick_processor_0/trig_*_o}]
-
-# Mode select for the TX mux crosses from the axi_gpio into the sample clock and
-# is resynchronised in qick_tx_mux.
-set_false_path -quiet -to [get_cells -quiet -hier -filter \
-    {name =~ *qick_tx_mux_0/sel_sync_reg[0] && IS_SEQUENTIAL}]

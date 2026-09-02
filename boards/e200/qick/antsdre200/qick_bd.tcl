@@ -199,55 +199,56 @@ ad_connect qick_adc_cat/dout        ro0/s_axis_tdata
 ad_connect util_ad9361_adc_fifo/dout_valid_0 ro0/s_axis_tvalid
 
 ###############################################################################
-## TX: mux between the stock DAC path and the QICK generator
+## TX: the generator drives the AD9361 transmit port directly
 ##
-## Defaults to the stock path, so a QICK build that produces nothing still
-## leaves the board's loopback behaviour intact. Selected by a dedicated
-## axi_gpio rather than by borrowing a bit of axi_gpreg's gp_out_*, which are
-## already routed out to system_top.v.
+## There is no mux and no select. The generator's samples replace the stock ADI
+## DMA/DDS data outright, so loading this overlay means the board's own loopback
+## demo no longer transmits -- that is the intended trade for a simpler design.
+##
+## axi_ad9361_dac_fifo is a util_rfifo and pull based: din_valid_0 is its
+## read-request *output* (the base design wires it to upack's fifo_rd_en) and
+## din_data_*/din_valid_in_* are the supplied data. din_enable_* is likewise an
+## output -- the channel enables originate in axi_ad9361 from the cf_axi_dds
+## driver -- so nothing here drives it.
+##
+## m_axis carries {Q,I} as one 32-bit word, so it is sliced into the fifo's two
+## 16-bit channels. valid_in and the generator's tready are tied high: the
+## generator produces one complex sample per clock and the converter consumes one
+## per clock, both on the divided clock, so they are inherently rate matched.
+## Gating tready on the fifo's request instead deadlocks -- with the stock
+## transmit path idle the fifo never asks, the generator never advances, and the
+## back-pressure stalls the tProc on the instruction that writes the waveform
+## descriptor.
 ###############################################################################
-# system_bd.tcl is sourced from inside adi_project, before adi_project_files
-# adds anything, so the module reference has to be put in the project here.
-add_files -norecurse -fileset sources_1 [list [file normalize ./qick_tx_mux.v]]
-update_compile_order -fileset sources_1
+ad_ip_instance xlslice qick_tx_i
+ad_ip_parameter qick_tx_i CONFIG.DIN_WIDTH  32
+ad_ip_parameter qick_tx_i CONFIG.DIN_FROM   15
+ad_ip_parameter qick_tx_i CONFIG.DIN_TO      0
+ad_ip_parameter qick_tx_i CONFIG.DOUT_WIDTH 16
 
-ad_ip_instance axi_gpio qick_gpio
-ad_ip_parameter qick_gpio CONFIG.C_GPIO_WIDTH   1
-ad_ip_parameter qick_gpio CONFIG.C_ALL_OUTPUTS  1
-ad_connect sys_cpu_clk     qick_gpio/s_axi_aclk
-ad_connect sys_cpu_resetn  qick_gpio/s_axi_aresetn
+ad_ip_instance xlslice qick_tx_q
+ad_ip_parameter qick_tx_q CONFIG.DIN_WIDTH  32
+ad_ip_parameter qick_tx_q CONFIG.DIN_FROM   31
+ad_ip_parameter qick_tx_q CONFIG.DIN_TO     16
+ad_ip_parameter qick_tx_q CONFIG.DOUT_WIDTH 16
 
-create_bd_cell -type module -reference qick_tx_mux qick_tx_mux_0
-ad_connect $qick_clk     qick_tx_mux_0/clk
-ad_connect $qick_rstn           qick_tx_mux_0/resetn
-ad_connect qick_gpio/gpio_io_o  qick_tx_mux_0/sel
+ad_ip_instance xlconstant qick_tx_one
+ad_ip_parameter qick_tx_one CONFIG.CONST_WIDTH 1
+ad_ip_parameter qick_tx_one CONFIG.CONST_VAL   1
 
-# Sits between util_ad9361_dac_upack and axi_ad9361_dac_fifo, i.e. on the
-# divided clock, so the fifo still performs the crossing up to l_clk. Putting
-# the mux at the fifo's output instead would require the generator to run at
-# 250 MHz. The base design wires upack straight to the fifo, so those nets have
-# to go before the mux can sit in between.
+# The base design wires upack straight to the fifo, so those nets have to go.
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_data_0]]
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_data_1]]
-# valid_in has to be muxed alongside the data, or the data is presented with a
-# valid that describes the other source. din_enable_* is deliberately NOT touched:
-# it is an output of this util_rfifo, with the channel enables originating in
-# axi_ad9361 from the cf_axi_dds driver.
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_valid_in_0]]
 delete_bd_objs [get_bd_nets -of_objects [get_bd_pins axi_ad9361_dac_fifo/din_valid_in_1]]
 
-ad_connect util_ad9361_dac_upack/fifo_rd_data_0  qick_tx_mux_0/dma_data_i
-ad_connect util_ad9361_dac_upack/fifo_rd_data_1  qick_tx_mux_0/dma_data_q
-ad_connect util_ad9361_dac_upack/fifo_rd_valid   qick_tx_mux_0/dma_valid_in
-ad_connect sg0/m_axis_tdata                      qick_tx_mux_0/qick_tdata
-ad_connect sg0/m_axis_tvalid                     qick_tx_mux_0/qick_tvalid
-ad_connect sg0/m_axis_tready                     qick_tx_mux_0/qick_tready
-ad_connect qick_tx_mux_0/dac_data_i              axi_ad9361_dac_fifo/din_data_0
-ad_connect qick_tx_mux_0/dac_data_q              axi_ad9361_dac_fifo/din_data_1
-ad_connect qick_tx_mux_0/dac_valid_in            axi_ad9361_dac_fifo/din_valid_in_0
-ad_connect qick_tx_mux_0/dac_valid_in            axi_ad9361_dac_fifo/din_valid_in_1
-
-ad_cpu_interconnect 0x48040000 qick_gpio
+ad_connect sg0/m_axis_tdata      qick_tx_i/Din
+ad_connect sg0/m_axis_tdata      qick_tx_q/Din
+ad_connect qick_tx_i/Dout        axi_ad9361_dac_fifo/din_data_0
+ad_connect qick_tx_q/Dout        axi_ad9361_dac_fifo/din_data_1
+ad_connect qick_tx_one/dout      axi_ad9361_dac_fifo/din_valid_in_0
+ad_connect qick_tx_one/dout      axi_ad9361_dac_fifo/din_valid_in_1
+ad_connect qick_tx_one/dout      sg0/m_axis_tready
 
 ###############################################################################
 ## PS-side DMA
